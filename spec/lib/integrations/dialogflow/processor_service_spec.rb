@@ -150,7 +150,7 @@ describe Integrations::Dialogflow::ProcessorService do
   end
 
   describe '#get_response' do
-    let(:google_dialogflow) { Google::Cloud::Dialogflow }
+    let(:google_dialogflow) { Google::Cloud::Dialogflow::V2::Sessions::Client }
     let(:session_client) { double }
     let(:session) { double }
     let(:query_input) { { text: { text: message, language_code: 'en-US' } } }
@@ -158,15 +158,21 @@ describe Integrations::Dialogflow::ProcessorService do
 
     before do
       hook.update(settings: { 'project_id' => 'test', 'credentials' => 'creds' })
-      allow(google_dialogflow).to receive(:sessions).and_return(session_client)
-      allow(session_client).to receive(:session_path).and_return(session)
+      allow(google_dialogflow).to receive(:new).and_return(session_client)
       allow(session_client).to receive(:detect_intent).and_return({ session: session, query_input: query_input })
     end
 
-    it 'returns indented response' do
+    it 'returns intended response' do
       response = processor.send(:get_response, conversation.contact_inbox.source_id, message.content)
       expect(response[:query_input][:text][:text]).to eq(message)
       expect(response[:query_input][:text][:language_code]).to eq('en-US')
+    end
+
+    it 'disables the hook if permission errors are thrown' do
+      allow(session_client).to receive(:detect_intent).and_raise(Google::Cloud::PermissionDeniedError)
+
+      expect { processor.send(:get_response, conversation.contact_inbox.source_id, message.content) }
+        .to change(hook, :status).from('enabled').to('disabled')
     end
   end
 end

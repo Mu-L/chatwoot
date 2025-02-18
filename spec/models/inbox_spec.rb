@@ -25,7 +25,7 @@ RSpec.describe Inbox do
 
     it { is_expected.to have_many(:conversations).dependent(:destroy_async) }
 
-    it { is_expected.to have_many(:messages).through(:conversations) }
+    it { is_expected.to have_many(:messages).dependent(:destroy_async) }
 
     it { is_expected.to have_one(:agent_bot_inbox) }
 
@@ -197,9 +197,45 @@ RSpec.describe Inbox do
 
   describe '#update' do
     let!(:inbox) { FactoryBot.create(:inbox) }
+    let!(:portal) { FactoryBot.create(:portal) }
 
     before do
       allow(Rails.configuration.dispatcher).to receive(:dispatch)
+    end
+
+    it 'set portal id in inbox' do
+      inbox.portal_id = portal.id
+      inbox.save
+
+      expect(inbox.portal).to eq(portal)
+    end
+
+    it 'sends the inbox_created event if ENABLE_INBOX_EVENTS is true' do
+      with_modified_env ENABLE_INBOX_EVENTS: 'true' do
+        channel = inbox.channel
+        channel.update(widget_color: '#fff')
+
+        expect(Rails.configuration.dispatcher).to have_received(:dispatch)
+          .with(
+            'inbox.updated',
+            kind_of(Time),
+            inbox: inbox,
+            changed_attributes: kind_of(Object)
+          )
+      end
+    end
+
+    it 'sends the inbox_created event if ENABLE_INBOX_EVENTS is false' do
+      channel = inbox.channel
+      channel.update(widget_color: '#fff')
+
+      expect(Rails.configuration.dispatcher).not_to have_received(:dispatch)
+        .with(
+          'inbox.updated',
+          kind_of(Time),
+          inbox: inbox,
+          changed_attributes: kind_of(Object)
+        )
     end
 
     it 'resets cache key if there is an update in the channel' do
@@ -213,6 +249,16 @@ RSpec.describe Inbox do
           account: inbox.account,
           cache_keys: inbox.account.cache_keys
         )
+    end
+
+    it 'updates the cache key after update' do
+      expect(inbox.account).to receive(:update_cache_key).with('inbox')
+      inbox.update(name: 'New Name')
+    end
+
+    it 'updates the cache key after touch' do
+      expect(inbox.account).to receive(:update_cache_key).with('inbox')
+      inbox.touch # rubocop:disable Rails/SkipsModelValidations
     end
   end
 end
